@@ -4,7 +4,6 @@ import torch.optim as optim
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 import preprocessing
-import testwithleaky
 import torchvision.models.resnet as resnet
 import resnetcae
 import os
@@ -54,6 +53,7 @@ tester = ModelTester(model)
 # Make sure this is a relative path from the project root.
 # Point it where the pretrained model weights are.
 tester.load_weights("models/ResNetCAE/epoch1.pt")
+
 
 good_loss = tester.test(good_data)
 bad_loss = tester.test(bad_data)

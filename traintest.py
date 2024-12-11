@@ -34,8 +34,7 @@ class ModelTrainer:
         data_loader = DataLoader(dataset=dataset,
                                  batch_size=batch_size,
                                  shuffle=True,
-                                 pin_memory=True,
-                                 num_workers=1)
+                                 pin_memory=True)
         if lr:
             self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
         torch.backends.cudnn.benchmark = self.use_cudnn_benchmark

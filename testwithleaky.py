@@ -32,14 +32,14 @@ if __name__ == "__main__":
     normal_entries = data_entries.loc[data_entries["Finding Labels"] == "No Finding"]
     print(len(normal_entries))
     # Partition the normal entries for unsupervised training.
-    normal_train = normal_entries.sample(frac=0.0001, replace=False, random_state=42).sort_index()
+    normal_train = normal_entries.sample(frac=0.001, replace=False, random_state=42).sort_index()
     print(len(normal_train))
     # Remember the rest of the set.
     normal_entries = normal_entries.drop(normal_train.index)
 
     train_dataset = ChestXRayDataset(subset=normal_train)
 
-    trainer = ModelTrainer(model, train_dataset)
-    trainer.train(save_dir='models/ResNetCAE', batch_size=1, num_epochs=100)
+    trainer = ModelTrainer(model)
+    trainer.train(dataset=train_dataset, save_dir='models/ResNetCAE', batch_size=8, num_epochs=100)
 
 
