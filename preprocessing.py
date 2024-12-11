@@ -35,90 +35,91 @@ for i in range(len(img_dirs)):
     data_dir = os.path.join(root_dir, "data")
     img_dirs[i] = os.path.join(data_dir, img_dirs[i])
     img_dirs[i] = os.path.join(img_dirs[i], "images")
-
+img_dirs = np.array(img_dirs)
 
 class ChestXRayDataset(Dataset):
     """Custom dataset of chest XRay images."""
 
-    def __init__(self, transform=img_transform, subset=None):
+    def __init__(self, transform=img_transform, subset=None, labels=None, store_as_tensor=True):
         """
         :param transform: Any necessary transforms for the input images.
         :param subset: A list of .
         Only images
         """
-        self.img_dir = img_dirs
         self.transform = transform
         self.dir_map = []
-        self.dir_splits = []
 
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.tensor = None
+        self.classes = None
 
-        self.tensor = torch.tensor([])
-        self.tensor.to(self.device)
+        if store_as_tensor:
+            self.tensor = torch.tensor([])
 
-        self.subsets = None
-        if subset is not None:
-            self.subsets = [[] for _ in range(len(img_dirs))]
-            for img in subset["Image Index"]:
-                dir_num = 0
-                while img >= file_splits[dir_num + 1]:
-                    dir_num += 1
-                    if dir_num + 1 >= len(file_splits):
-                        break
-                self.subsets[dir_num].append(os.listdir(img_dirs[dir_num]).index(img))
-        # This section lets us address images by an index in the directory, rather than by their file name.
-        # It will be useful when looping through the directory.
+        if subset is None:
+            subset = data_entries
 
-        # Now, prune the map for non-PNG files and any file not indexed in subsets.
-        for i in range(len(self.img_dir)):
-            curr_dir = list(os.listdir(self.img_dir[i]))
-            self.dir_splits.append(0)
-            for j in range(len(curr_dir) - 1):
-                file = curr_dir[j]
-                if file.endswith(".png"):
-                    if self.subsets:
-                        if j in self.subsets[i]:
-                            self.dir_map.append(file)
-                            self.dir_splits[i] += 1
-                            img_path = os.path.join(self.img_dir[i], file)
-                            image = read_image(str(img_path))
-                            image.to(self.device)
-                            # Apply any necessary transforms.
-                            if self.transform:
-                                image = self.transform(image[:3, :, :])
-                                image = torch.unsqueeze(image, 0)
-                            self.tensor = torch.cat([self.tensor, image], dim=0)
-                    else:
-                        self.dir_map.append(file)
-                        self.dir_splits[i] += 1
-                        img_path = os.path.join(self.img_dir[i], file)
-                        image = read_image(str(img_path))
-                        # Apply any necessary transforms.
-                        if self.transform:
-                            image = self.transform(image[:3, :, :])
-                        self.tensor = torch.cat([self.tensor, image], dim=0)
+        for img_id in subset["Image Index"]:
+            # In case the image isn't an image. Don't think this will come up though.
+            if not img_id.endswith(".png"):
+                break
 
-        self.img_dir = np.array(self.img_dir)
+            # We need to find which image directory the target is in.
+            dir_num = 0
+            curr_dir = list(os.listdir(img_dirs[0]))
+            while img_id >= file_splits[dir_num + 1]:
+                dir_num += 1
+                if dir_num + 1 >= len(file_splits):
+                    break
+            img_path = os.path.join(img_dirs[dir_num], img_id)
+
+            # This is the part where we apply the transforms to the image and save the tensor.
+            img = read_image(str(img_path))
+            self.dir_map.append(img)
+            if self.tensor is not None:
+                if self.transform:
+                    img = self.transform(img[:3, :, :])
+                    img = torch.unsqueeze(img, 0)
+                self.tensor = torch.cat([self.tensor, img], dim=0)
+        # We need these as np arrays for performance reasons (Python lists cause memory leaks with DataLoaders).
         self.dir_map = np.array(self.dir_map)
-        self.dir_splits = np.array(self.dir_splits)
-        self.tensor.to(self.device)
+
+        if labels is not None:
+            self.classes = []
+            for img_labels in subset["Finding Labels"]:
+                img_labels = img_labels.split(separator="|")
+                img_classes = []
+                for label in labels:
+                    # If we have the "No Finding" label, it means we're doing a one-class classifier.
+                    # Thus, we want only one class, which represents whether a finding exists or not.
+                    if label == "No Finding":
+                        img_classes = [0 if label in img_labels else 1]
+                        break
+                    # This is the most likely outcome, if testing for a particular pathology (or pathologies).
+                    img_classes.append(1 if label in img_labels else 0)
+                self.classes.append(img_classes)
+            # We need this as a np array for performance reasons (same as above).
+            self.classes = np.array(self.classes)
 
     def __len__(self):
         return len(self.dir_map)
 
     def __getitem__(self, idx):
         # This segment determines which file path contains the indexed image.
-        # dir_num = 0
-        # accum = self.dir_splits[0]
-        # while idx >= accum and dir_num < len(self.img_dir):
-        #     dir_num += 1
-        #     accum += self.dir_splits[dir_num]
-        # # Get the image from the file path.
-        # img_path = os.path.join(self.img_dir[dir_num], self.dir_map[idx])
-        # image = read_image(str(img_path))
-        # # Apply any necessary transforms.
-        # if self.transform:
-        #     image = self.transform(image[:3, :, :])
-        # image.to(self.device)
-        image = self.tensor[idx]
-        return image
+        if self.tensor is not None:
+            img = self.tensor[idx, :]
+
+        else:
+            img_path = self.dir_map[idx]
+            img = read_image(str(img_path))
+            if self.transform:
+                img = self.transform(img[:3, :, :])
+                img = torch.unsqueeze(img, 0)
+
+        # We also want to include the classes if using a supervised model.
+        if self.classes is None:
+            return img
+        else:
+            return img, self.classes[idx]
+
+    def is_labelled(self) -> bool:
+        return True if self.classes is not None else False
